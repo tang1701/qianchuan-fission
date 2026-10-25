@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>生成激活码</title>
+  <HTA:APPLICATION
+    ID="EAutoLicense"
+    APPLICATIONNAME="EAuto License"
+    BORDER="dialog"
+    BORDERSTYLE="normal"
+    CAPTION="yes"
+    SHOWINTASKBAR="yes"
+    SINGLEINSTANCE="yes"
+    SYSMENU="yes"
+    SCROLL="yes"
+    WINDOWSTATE="normal"
+    INNERBORDER="no"
+  />
+  <style>
+    body { font-family: "Microsoft YaHei UI", sans-serif; font-size: 13px; margin: 16px; background: #f5f5f5; }
+    label { display: block; margin: 8px 0 4px; color: #333; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+    textarea { height: 100px; resize: vertical; font-family: Consolas, monospace; font-size: 11px; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .row input { width: 80px; }
+    button { margin-top: 12px; padding: 8px 16px; background: #0d9488; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0f766e; }
+    #status { margin-top: 10px; min-height: 20px; color: #666; }
+    #status.err { color: #b91c1c; }
+    #status.ok { color: #047857; }
+    #meta { margin-top: 8px; color: #444; white-space: pre-line; }
+  </style>
+</head>
+<body onload="resizeWin()">
+  <h3 style="margin:0 0 12px;font-size:15px;">千川裂变神器 · 生成激活码</h3>
+  <label for="machine">用户机器码（软件底部复制，可带横线）</label>
+  <input id="machine" type="text" />
+
+  <label for="days">有效天数</label>
+  <div class="row">
+    <input id="days" type="number" value="30" min="1" max="3650" />
+  </div>
+
+  <button type="button" onclick="generate()">生成并复制激活码</button>
+  <div id="status">首次使用请先在项目目录运行 npm run license:keys</div>
+
+  <label for="code">激活码</label>
+  <textarea id="code" readonly></textarea>
+  <div id="meta"></div>
+
+  <script type="text/javascript">
+    function resizeWin() {
+      try {
+        window.resizeTo(640, 520);
+        window.moveTo(
+          (screen.availWidth - 640) / 2,
+          (screen.availHeight - 520) / 2
+        );
+      } catch (e) {}
+    }
+
+    var projectRoot = (function () {
+      var p = unescape(location.pathname.substring(1));
+      if (p.indexOf('/') >= 0) p = p.replace(/\//g, '\\');
+      return p.replace(/\\scripts\\license\\Issue-ActivationCode\.hta$/i, '');
+    })();
+
+    function setStatus(msg, kind) {
+      var el = document.getElementById('status');
+      el.className = kind || '';
+      el.innerText = msg;
+    }
+
+    function generate() {
+      var machine = document.getElementById('machine').value.replace(/^\s+|\s+$/g, '');
+      var days = parseInt(document.getElementById('days').value, 10) || 30;
+      if (!machine) {
+        setStatus('请先粘贴用户机器码', 'err');
+        return;
+      }
+      setStatus('正在生成...', '');
+      document.getElementById('code').value = '';
+      document.getElementById('meta').innerText = '';
+
+      var fso = new ActiveXObject('Scripting.FileSystemObject');
+      var outFile = fso.BuildPath(fso.GetSpecialFolder(2), 'eauto-license-out.json');
+      var errFile = fso.BuildPath(fso.GetSpecialFolder(2), 'eauto-license-err.txt');
+      try { if (fso.FileExists(outFile)) fso.DeleteFile(outFile, true); } catch (e) {}
+      try { if (fso.FileExists(errFile)) fso.DeleteFile(errFile, true); } catch (e) {}
+
+      var shell = new ActiveXObject('WScript.Shell');
+      var cmd =
+        'cmd /c cd /d "' + projectRoot + '" && npx tsx "scripts\\license\\issueCli.ts" --json --machine "' +
+        machine.replace(/"/g, '') +
+        '" --days ' +
+        days +
+        ' 1>"' +
+        outFile +
+        '" 2>"' +
+        errFile +
+        '"';
+      var exitCode = shell.Run(cmd, 0, true);
+
+      if (!fso.FileExists(outFile)) {
+        var err = '';
+        if (fso.FileExists(errFile)) {
+          var ef = fso.OpenTextFile(errFile, 1, false, -1);
+          err = ef.ReadAll();
+          ef.Close();
+        }
+        setStatus(err || '生成失败，请确认已 npm install 且存在私钥', 'err');
+        return;
+      }
+
+      var tf = fso.OpenTextFile(outFile, 1, false, -1);
+      var json = tf.ReadAll();
+      tf.Close();
+      var res;
+      try {
+        res = JSON.parse(json);
+      } catch (e2) {
+        setStatus('解析结果失败', 'err');
+        return;
+      }
+      if (!res.ok) {
+        setStatus(res.error || '生成失败', 'err');
+        return;
+      }
+
+      document.getElementById('code').value = res.code;
+      document.getElementById('meta').innerText =
+        '绑定机器: ' + res.machineDisplay + '\n到期: ' + res.expiresAt + ' (' + res.days + ' 天)';
+
+      try {
+        var clip = new ActiveXObject('htmlfile');
+        clip.parentWindow.clipboardData.setData('Text', res.code);
+        setStatus('已复制到剪贴板，可直接粘贴发给用户', 'ok');
+      } catch (e3) {
+        setStatus('生成成功，请手动复制下方激活码', 'ok');
+      }
+    }
+  </script>
+</body>
+</html>
